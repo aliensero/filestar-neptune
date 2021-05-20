@@ -4,9 +4,9 @@ use crate::cl::GPUSelector;
 use crate::error::Error;
 use crate::poseidon::{Poseidon, PoseidonConstants};
 use crate::{Arity, BatchHasher};
+use bellperson::bls::{Bls12, Fr};
 use ff::Field;
 use generic_array::GenericArray;
-use paired::bls12_381::{Bls12, Fr};
 
 pub trait TreeBuilderTrait<TreeArity>
 where
@@ -250,9 +250,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bellperson::bls::Fr;
     use ff::Field;
     use generic_array::typenum::U8;
-    use paired::bls12_381::Fr;
 
     #[test]
     fn test_tree_builder() {
@@ -274,9 +274,13 @@ mod tests {
         let batch_size = leaves / num_batches;
 
         for rows_to_discard in 0..3 {
-            let mut builder =
-                TreeBuilder::<U8>::new(batcher_type, leaves, max_tree_batch_size, rows_to_discard)
-                    .unwrap();
+            let mut builder = TreeBuilder::<U8>::new(
+                batcher_type.clone(),
+                leaves,
+                max_tree_batch_size,
+                rows_to_discard,
+            )
+            .unwrap();
 
             // Simplify computing the expected root.
             let constant_element = Fr::zero();

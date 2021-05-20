@@ -2,7 +2,7 @@ use log::*;
 use std::collections::HashMap;
 use std::fmt;
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use triton::bindings;
 use triton::FutharkContext;
 
@@ -19,14 +19,8 @@ struct cl_amd_device_topology {
 }
 
 lazy_static! {
-    pub static ref FUTHARK_CONTEXT_MAP: Mutex<HashMap<u32, Arc<Mutex<FutharkContext>>>> =
-        Mutex::new(HashMap::new());
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum GPUSelector {
-    BusId(u32),
-    Index(usize),
+    pub static ref FUTHARK_CONTEXT_MAP: RwLock<HashMap<u32, Arc<Mutex<FutharkContext>>>> =
+        RwLock::new(HashMap::new());
 }
 
 #[derive(Debug, Clone)]
@@ -245,6 +239,12 @@ fn create_queue(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum GPUSelector {
+    BusId(u32),
+    Index(usize),
+}
+
 impl GPUSelector {
     pub fn get_bus_id(&self) -> ClResult<u32> {
         match self {
@@ -285,7 +285,8 @@ pub fn get_all_bus_ids() -> ClResult<Vec<u32>> {
 }
 
 pub fn futhark_context(selector: GPUSelector) -> ClResult<Arc<Mutex<FutharkContext>>> {
-    let mut map = FUTHARK_CONTEXT_MAP.lock().unwrap();
+    info!("getting context for ~{:?}", selector);
+    let mut map = FUTHARK_CONTEXT_MAP.write().unwrap();
     let bus_id = selector.get_bus_id()?;
     if !map.contains_key(&bus_id) {
         let device = get_device_by_bus_id(bus_id)?;
@@ -296,7 +297,32 @@ pub fn futhark_context(selector: GPUSelector) -> ClResult<Arc<Mutex<FutharkConte
 }
 
 pub fn default_futhark_context() -> ClResult<Arc<Mutex<FutharkContext>>> {
-    futhark_context(GPUSelector::Index(0))
+    let bus_id = std::env::var("NEPTUNE_DEFAULT_GPU")
+        .ok()
+        .and_then(|v| match v.parse::<u32>() {
+            Ok(bus_id) => Some(bus_id),
+            Err(_) => {
+                error!("Bus-id '{}' is given in wrong format!", v);
+                None
+            }
+        });
+
+    match bus_id {
+        Some(bus_id) => {
+            info!(
+                "Using device with bus-id {} for creating the FutharkContext...",
+                bus_id
+            );
+            futhark_context(GPUSelector::BusId(bus_id))
+        }
+        .or_else(|_| {
+            error!(
+                "A device with the given bus-id doesn't exist! Defaulting to the first device..."
+            );
+            futhark_context(GPUSelector::Index(0))
+        }),
+        None => futhark_context(GPUSelector::Index(0)),
+    }
 }
 
 fn to_u32(inp: &[u8]) -> u32 {
